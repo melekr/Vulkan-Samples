@@ -19,6 +19,7 @@ package com.khronos.vulkan_samples;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.os.Bundle;
@@ -27,12 +28,15 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.View;
 import android.widget.Toast;
 
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 import androidx.appcompat.widget.Toolbar;
@@ -43,6 +47,18 @@ import com.khronos.vulkan_samples.model.Sample;
 import com.khronos.vulkan_samples.model.SampleStore;
 import com.khronos.vulkan_samples.views.PermissionView;
 import com.khronos.vulkan_samples.views.SampleListView;
+
+import backtraceio.library.BacktraceClient;
+import backtraceio.library.BacktraceCredentials;
+import backtraceio.library.BacktraceDatabase;
+import backtraceio.library.base.BacktraceBase;
+import backtraceio.library.enums.BacktraceBreadcrumbType;
+import backtraceio.library.enums.database.RetryBehavior;
+import backtraceio.library.enums.database.RetryOrder;
+import backtraceio.library.events.OnServerResponseEventListener;
+import backtraceio.library.models.BacktraceExceptionHandler;
+import backtraceio.library.models.database.BacktraceDatabaseSettings;
+import backtraceio.library.models.json.BacktraceReport;
 
 public class SampleLauncherActivity extends AppCompatActivity {
 
@@ -56,6 +72,64 @@ public class SampleLauncherActivity extends AppCompatActivity {
 
     // Required sample permissions
     List<Permission> permissions;
+
+    private BacktraceClient backtraceClient;
+    private OnServerResponseEventListener listener;
+    private final int anrTimeout = 3000;
+
+//    static {
+//        System.loadLibrary("native-lib");
+//    }
+
+    public void setOnServerResponseEventListener(OnServerResponseEventListener e) {
+        this.listener = e;
+    }
+
+    private BacktraceClient initializeBacktrace(final String submissionUrl) {
+        BacktraceCredentials credentials = new BacktraceCredentials(submissionUrl);
+
+        Context context = getApplicationContext();
+        String dbPath = context.getFilesDir().getAbsolutePath();
+
+        BacktraceDatabaseSettings settings = new BacktraceDatabaseSettings(dbPath);
+        settings.setMaxRecordCount(100);
+        settings.setMaxDatabaseSize(1000);
+        settings.setRetryBehavior(RetryBehavior.ByInterval);
+        settings.setAutoSendMode(true);
+        settings.setRetryOrder(RetryOrder.Queue);
+
+        Map<String, Object> attributes = new HashMap<String, Object>() {
+            {
+                put("custom.attribute", "My Custom Attribute");
+            }
+        };
+
+        List<String> attachments = new ArrayList<String>() {
+            {
+                add(context.getFilesDir() + "/" + "myCustomFile.txt");
+            }
+        };
+
+        BacktraceDatabase database = new BacktraceDatabase(context, settings);
+        BacktraceClient backtraceClient = new BacktraceClient(context, credentials, database, attributes, attachments);
+
+        BacktraceExceptionHandler.enable(backtraceClient);
+
+        backtraceClient.metrics.enable();
+
+        // Enable handling of native crashes
+        database.setupNativeIntegration(backtraceClient, credentials, true);
+
+        // Enable ANR detection
+        backtraceClient.enableAnr(anrTimeout);
+        return backtraceClient;
+    }
+
+    public void sendReport() {
+        BacktraceReport report = new BacktraceReport("Test");
+        backtraceClient.send(report);
+    }
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -81,6 +155,10 @@ public class SampleLauncherActivity extends AppCompatActivity {
             // Chain request permissions
             requestNextPermission();
         }
+
+        // BT
+
+        sendReport();
     }
 
     @Override
